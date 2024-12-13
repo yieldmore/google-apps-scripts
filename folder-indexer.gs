@@ -1,7 +1,7 @@
 /*
   What this does:
     Lists all files and sub-folders from a folder in Google Drive.
-    Assumes activeSheet >> parent is the [Shared] Folder to be scanned.
+    Assumes activeSheet >> parent is the [Shared Drive / ] Folder to be scanned.
 
   Adapted from Code written by @hubgit https://gist.github.com/hubgit/3755293
   Updated since DocsList is deprecated  https://ctrlq.org/code/19854-list-files-in-google-drive-folder
@@ -20,7 +20,7 @@
     https://github.com/yieldmore/google-apps-scripts/blob/master/folder-indexer.gs
 
   TODO:
-    * Put in a date sheet and move that sheet to the beginning and set it as active.
+    Move output to a teams.amadeusweb.com and use datatables / an auth database to show it.
 */
 
 var sheet = SpreadsheetApp.getActiveSheet()
@@ -58,7 +58,7 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
     Logger.log("REBUILDING SHEET In: " + sheetFile.getName())
   }
 
-  Logger.log("SCANNING: " + folderName) //DEBUG
+  Logger.log("SCANNING: " + folderName)
 
   var relativeFolder = folderName + (isTopFolder ? '' : ' « ' + relativeFolderName)
 
@@ -66,11 +66,12 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
     ? DriveApp.getFolderById(sharedDrive.id)
     : DriveApp.getFoldersByName(folderName).next()
 
-  var subFolders = folder.getFolders()
+  var subFolders = getFoldersOf(folder)
 
-  while (subFolders.hasNext()) {
-    var item = subFolders.next()
-    Logger.log('Adding Folder: ' + item.getName())
+  var folderIndex = 0
+  while (folderIndex < subFolders.length) {
+    var item = subFolders[folderIndex]
+    folderIndex += 1
 
     var data = [
       level,
@@ -97,7 +98,7 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
 
     var data = [
       level,
-      'FILE',
+      'File',
       indent + '/ ' + item.getName(),
       item.getDescription(),
       isTopFolder ? item.ModifiedTimeRaw : item.getLastUpdated(),
@@ -109,6 +110,22 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
     sheet.appendRow(data)
   }
 
+}
+
+function sortAscending(item1, item2) {
+  var a = item1.getName(), b = item2.getName()
+  return a > b ? 1 : (a < b ? -1 : 0)
+}
+
+function getFoldersOf(folder) {
+  var result = []
+
+  var subFolders = folder.getFolders();
+  while (subFolders.hasNext())
+    result.push(subFolders.next())
+  
+  result.sort(sortAscending)
+  return result
 }
 
 function getFilesOf(top, folder) {
@@ -123,6 +140,7 @@ function getFilesOf(top, folder) {
   while (files.hasNext())
     result.push(files.next())
 
+  result.sort(sortAscending)
   return result;
 }
 
