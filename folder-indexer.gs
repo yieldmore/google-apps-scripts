@@ -14,13 +14,13 @@
    * added removeEmptyRows/Columns from Trey (SO)
    * added .getParents()[0].getName() per SO: https://stackoverflow.com/a/17618407
    * Merged Files & Fols into one sheet and added level, indent
+   * Decided whether to list subfolders first, not files.
 
   Get this From:
     https://github.com/yieldmore/google-apps-scripts/blob/master/folder-indexer.gs
 
   TODO:
     * Put in a date sheet and move that sheet to the beginning and set it as active.
-    * Debate whether to list folders / files first.
 */
 
 var sheet = SpreadsheetApp.getActiveSheet()
@@ -45,16 +45,13 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
     sheet.clearContents()
 
     sheet.appendRow([
-      "Indent",
       "Level",
-      "Folder",
-      "File",
+      "Type",
+      "Name",
       "Description",
       "Date Last Updated",
       "Size",
       "URL",
-      //"ID",
-      "Type",
       "Folder",
     ])
 
@@ -63,34 +60,11 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
 
   Logger.log("SCANNING: " + folderName) //DEBUG
 
+  var relativeFolder = folderName + (isTopFolder ? '' : ' « ' + relativeFolderName)
+
   var folder = isTopFolder
     ? DriveApp.getFolderById(sharedDrive.id)
     : DriveApp.getFoldersByName(folderName).next()
-
-  var files = getFilesOf(isTopFolder, folder)
-
-  var parentFolderPrefix = relativeFolderName == topFolderName ? '' : relativeFolderName + ' » '
-
-  var fileIndex = 0
-  while (fileIndex < files.length) {
-    var item = files[fileIndex]
-    fileIndex += 1
-
-    var data = [
-      level,
-      "--",
-      indent + item.getName(),
-      item.getDescription(),
-      isTopFolder ? item.ModifiedTimeRaw : item.getLastUpdated(),
-      item.getSize(),
-      isTopFolder ? item.WebViewLink : item.getUrl(),
-      //item.getId(),
-      'FILE', //item.getBlob().getContentType(),
-      parentFolderPrefix + folderName,
-    ]
-
-    sheet.appendRow(data)
-  }
 
   var subFolders = folder.getFolders()
 
@@ -100,22 +74,41 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
 
     var data = [
       level,
-      indent + item.getName(),
-      "--",
+      'Folder',
+      indent + '/ ' + item.getName(),
       item.getDescription(),
       isTopFolder ? item.ModifiedTimeRaw : item.getLastUpdated(),
       item.getSize(),
       item.getUrl(),
-      //item.getId(),
-      'Google Folder',
-      relativeFolderName + ' » ' + folderName,
+      relativeFolder,
     ]
 
     sheet.appendRow(data)
 
-    var relativeFolderParam = folderName + (topFolderName == folderName ? '' : ' « ' + relativeFolderName)
-    ScanFoldeRecursively(item.getName(), relativeFolderParam, level + 1, indent + '  ')
+    ScanFoldeRecursively(item.getName(), folderName + ' « ' + relativeFolder, level + 1, indent + '  ')
   }
+
+  var files = getFilesOf(isTopFolder, folder)
+
+  var fileIndex = 0
+  while (fileIndex < files.length) {
+    var item = files[fileIndex]
+    fileIndex += 1
+
+    var data = [
+      level,
+      'FILE',
+      indent + '/ ' + item.getName(),
+      item.getDescription(),
+      isTopFolder ? item.ModifiedTimeRaw : item.getLastUpdated(),
+      item.getSize(),
+      isTopFolder ? item.WebViewLink : item.getUrl(),
+      relativeFolder,
+    ]
+
+    sheet.appendRow(data)
+  }
+
 }
 
 function getFilesOf(top, folder) {
