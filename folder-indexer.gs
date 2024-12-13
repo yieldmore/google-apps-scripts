@@ -19,19 +19,21 @@
    * Merged Files & Fols into one sheet and added level, indent
    * Decided whether to list subfolders first, not files.
    * Support for Drive Folder / Shared Drive (14th Dec)
-   * Uses "Drives to Scan" which tells the name/type
+   * Uses "Drives to Scan" which tells the name/type, and, if missing, will search SharedDrives to detect the type
 
   TODO:
-    Move output to a teams.amadeusweb.com and use datatables / an auth database to show it.
+   * Set status of row and update the count
+   * Move output to a teams.amadeusweb.com and use datatables / an auth database to show it.
 */
 
-var sheet = SpreadsheetApp.getActiveSheet()
-var sheetFile = SpreadsheetApp.getActiveSpreadsheet()
-var namesSheet = sheetFile.getSheetByName('Drives to Scan')
+var sheet = SpreadsheetApp.getActiveSheet(),
+    sheetFile = SpreadsheetApp.getActiveSpreadsheet(),
+    namesSheet = sheetFile.getSheetByName('Drives to Scan')
 
-var isSharedDrive = false
-var isTopFolder = false
-var topFolderName = ''
+var isSharedDrive = false,
+    isTopFolder = false,
+    topFolderName = '',
+    topFolderId = ''
 
 function ScanAllDrives() {
   if (sheet == null) {
@@ -41,12 +43,26 @@ function ScanAllDrives() {
 
   Logger.log('Detected Sheet: ' + sheetFile.getName())
 
-  sheetFile.setActiveSheet(namesSheet)
 
-  var parents = [], rows = namesSheet.getRange(2, 1, namesSheet.getLastRow() - 1, 2).getValues()
-  Logger.log(rows)
+  var parents = []
 
-  rows.forEach(function(item) { parents.push({name: item[0], type: item[1]}) })
+  if (namesSheet != null) {
+    rows = namesSheet.getRange(2, 1, namesSheet.getLastRow() - 1, 2).getValues()
+    rows.forEach(function(item) { parents.push({name: item[0], type: item[1]}) })
+    sheetFile.setActiveSheet(namesSheet)
+  } else {
+    var parentType = 'folder',
+      parentName = DriveApp.getFileById(sheetFile.getId()).getParents().next().getName()
+
+    try {
+      var sharedDrive = Drive.Drives.list
+      ({q: 'name = "' + parentName + '"', supportsAllDrives: true })
+      .drives.pop()
+      topFolderId = sharedDrive.id
+      parentType = 'shared'
+    } catch {}
+    parents.push({name: parentName, type: parentType})
+  }
 
   parents.forEach(ScanDrive)
 }
@@ -63,12 +79,12 @@ function ScanDrive(parent, nameIndex) {
     sheet = sheetFile.insertSheet(parent.name)
   }
 
-  ScanFoldeRecursively(topFolderName, '', 0, '')
+  ScanFolder(topFolderName, '', 0, '')
   removeEmptyColumns()
   removeEmptyRows()
 }
 
-function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
+function ScanFolder(folderName, relativeFolderName, level, indent) {
   isTopFolder = topFolderName == folderName
   if (isTopFolder) {
     sheet.clearContents()
@@ -113,7 +129,7 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
 
     sheet.appendRow(data)
 
-    ScanFoldeRecursively(item.getName(), folderName + ' « ' + relativeFolder, level + 1, indent + '  ')
+    ScanFolder(item.getName(), folderName + ' « ' + relativeFolder, level + 1, indent + '  ')
   }
 
   var files = getFilesOf(folder)
@@ -157,7 +173,7 @@ function getFoldersOf(folder) {
 
 function getFilesOf(folder) {
   if (isTopFolder && isSharedDrive) {
-    return Drive.Files.list({driveId: sharedDriveId, corpora: "drive",
+    return Drive.Files.list({driveId: topFolderId, corpora: "drive",
       includeItemsFromAllDrives: true, supportsAllDrives: true}).files
   }
   
