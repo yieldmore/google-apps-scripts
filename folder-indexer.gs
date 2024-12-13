@@ -1,7 +1,10 @@
 /*
   What this does:
     Lists all files and sub-folders from a folder in Google Drive.
-    Assumes activeSheet >> parent is the [Shared Drive / ] Folder to be scanned.
+    Looks for a "Drives to Scan" sheet to scan in multiple places, else scans activeSheet >> parent.
+
+  View Code / History:
+    https://github.com/yieldmore/google-apps-scripts/blob/master/folder-indexer.gs
 
   Adapted from Code written by @hubgit https://gist.github.com/hubgit/3755293
   Updated since DocsList is deprecated  https://ctrlq.org/code/19854-list-files-in-google-drive-folder
@@ -15,32 +18,58 @@
    * added .getParents()[0].getName() per SO: https://stackoverflow.com/a/17618407
    * Merged Files & Fols into one sheet and added level, indent
    * Decided whether to list subfolders first, not files.
-
-  Get this From:
-    https://github.com/yieldmore/google-apps-scripts/blob/master/folder-indexer.gs
+   * Support for Drive Folder / Shared Drive (14th Dec)
+   * Uses "Drives to Scan" which tells the name/type
 
   TODO:
     Move output to a teams.amadeusweb.com and use datatables / an auth database to show it.
 */
 
 var sheet = SpreadsheetApp.getActiveSheet()
-var sheetFile = DriveApp.getFileById(sheet.getParent().getId())
-Logger.log('Detected Sheet: ' + sheetFile.getName())
+var sheetFile = SpreadsheetApp.getActiveSpreadsheet()
+var namesSheet = sheetFile.getSheetByName('Drives to Scan')
 
-var sharedDriveId = sheetFile.getParents().next().getId()
-var sharedDrive = Drive.Drives.get(sharedDriveId, { supportsAllDrives: true })
-Logger.log('Scanning Shared Drive: ' + sharedDrive.getName())
+var isSharedDrive = false
+var isTopFolder = false
+var topFolderName = ''
 
-var topFolderName = sharedDrive.name
+function ScanAllDrives() {
+  if (sheet == null) {
+    Logger.log('No Active Sheet')
+    return
+  }
 
-function ScanFolder() {
+  Logger.log('Detected Sheet: ' + sheetFile.getName())
+
+  sheetFile.setActiveSheet(namesSheet)
+
+  var parents = [], rows = namesSheet.getRange(2, 1, namesSheet.getLastRow() - 1, 2).getValues()
+  Logger.log(rows)
+
+  rows.forEach(function(item) { parents.push({name: item[0], type: item[1]}) })
+
+  parents.forEach(ScanDrive)
+}
+
+function ScanDrive(parent, nameIndex) {
+  Logger.log(parent)
+  isSharedDrive = parent.type == 'shared'
+  topFolderName = parent.name
+
+  Logger.log('Scanning ' + (isSharedDrive ? 'Shared' : 'Folder in ') + ' Drive: ' + topFolderName)
+
+  sheet = sheetFile.getSheetByName(parent.name)
+  if (sheet == null) {
+    sheet = sheetFile.insertSheet(parent.name)
+  }
+
   ScanFoldeRecursively(topFolderName, '', 0, '')
   removeEmptyColumns()
   removeEmptyRows()
 }
 
 function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
-  var isTopFolder = topFolderName == folderName
+  isTopFolder = topFolderName == folderName
   if (isTopFolder) {
     sheet.clearContents()
 
@@ -62,9 +91,7 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
 
   var relativeFolder = folderName + (isTopFolder ? '' : ' « ' + relativeFolderName)
 
-  var folder = isTopFolder
-    ? DriveApp.getFolderById(sharedDrive.id)
-    : DriveApp.getFoldersByName(folderName).next()
+  var folder = DriveApp.getFoldersByName(folderName).next()
 
   var subFolders = getFoldersOf(folder)
 
@@ -78,7 +105,7 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
       'Folder',
       indent + '/ ' + item.getName(),
       item.getDescription(),
-      isTopFolder ? item.ModifiedTimeRaw : item.getLastUpdated(),
+      isTopFolder && isSharedDrive ? item.ModifiedTimeRaw : item.getLastUpdated(),
       item.getSize(),
       item.getUrl(),
       relativeFolder,
@@ -89,7 +116,7 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
     ScanFoldeRecursively(item.getName(), folderName + ' « ' + relativeFolder, level + 1, indent + '  ')
   }
 
-  var files = getFilesOf(isTopFolder, folder)
+  var files = getFilesOf(folder)
 
   var fileIndex = 0
   while (fileIndex < files.length) {
@@ -101,9 +128,9 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
       'File',
       indent + '/ ' + item.getName(),
       item.getDescription(),
-      isTopFolder ? item.ModifiedTimeRaw : item.getLastUpdated(),
+      isTopFolder && isSharedDrive ? item.ModifiedTimeRaw : item.getLastUpdated(),
       item.getSize(),
-      isTopFolder ? item.WebViewLink : item.getUrl(),
+      isTopFolder && isSharedDrive ? item.WebViewLink : item.getUrl(),
       relativeFolder,
     ]
 
@@ -128,8 +155,8 @@ function getFoldersOf(folder) {
   return result
 }
 
-function getFilesOf(top, folder) {
-  if (top) {
+function getFilesOf(folder) {
+  if (isTopFolder && isSharedDrive) {
     return Drive.Files.list({driveId: sharedDriveId, corpora: "drive",
       includeItemsFromAllDrives: true, supportsAllDrives: true}).files
   }
@@ -147,31 +174,21 @@ function getFilesOf(top, folder) {
 //NOT USED: https://arisazhar.com/remove-empty-rows-in-spreadsheet-instantly/
 
 //FROM: https://stackoverflow.com/a/34781833
-//Remove All Empty Columns in the Entire Workbook
+//UPDATE: Use Global Sheet Variable
+//Remove All Empty Columns in the Current Sheet
 function removeEmptyColumns() {
-  var ss = SpreadsheetApp.getActive()
-  var allsheets = ss.getSheets()
-  for (var s in allsheets) {
-    var sheet=allsheets[s]
-    var maxColumns = sheet.getMaxColumns()
-    var lastColumn = sheet.getLastColumn()
-    if (maxColumns - lastColumn != 0) {
-      sheet.deleteColumns(lastColumn + 1, maxColumns - lastColumn)
-    }
+  var maxColumns = sheet.getMaxColumns()
+  var lastColumn = sheet.getLastColumn()
+  if (maxColumns - lastColumn != 0) {
+    sheet.deleteColumns(lastColumn + 1, maxColumns - lastColumn)
   }
 }
 
-//Remove All Empty Rows in the Entire Workbook
+//Remove All Empty Rows in the Current Sheet
 function removeEmptyRows() {
-  var ss = SpreadsheetApp.getActive()
-  var allsheets = ss.getSheets()
-
-  for (var s in allsheets){
-    var sheet = allsheets[s]
-    var maxRows = sheet.getMaxRows()
-    var lastRow = sheet.getLastRow()
-    if (maxRows - lastRow != 0) {
-      sheet.deleteRows(lastRow + 1, maxRows - lastRow)
-    }
+  var maxRows = sheet.getMaxRows()
+  var lastRow = sheet.getLastRow()
+  if (maxRows - lastRow != 0) {
+    sheet.deleteRows(lastRow + 1, maxRows - lastRow)
   }
 }
