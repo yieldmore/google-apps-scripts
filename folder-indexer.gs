@@ -13,6 +13,7 @@
    * uses ' » ' as folder separator
    * added removeEmptyRows/Columns from Trey (SO)
    * added .getParents()[0].getName() per SO: https://stackoverflow.com/a/17618407
+   * Merged Files & Fols into one sheet and added level, indent
 
   Get this From:
     https://github.com/yieldmore/google-apps-scripts/blob/master/folder-indexer.gs
@@ -62,25 +63,27 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
 
   Logger.log("SCANNING: " + folderName) //DEBUG
 
-  var folder = DriveApp.getFoldersByName(folderName).next()
+  var folder = isTopFolder
+    ? DriveApp.getFolderById(sharedDrive.id)
+    : DriveApp.getFoldersByName(folderName).next()
 
-  var files = isTopFolder ? Drive.Files.list({driveId: sharedDriveId}).files.values() : folder.getFiles()
+  var files = getFilesOf(isTopFolder, folder)
 
   var parentFolderPrefix = relativeFolderName == topFolderName ? '' : relativeFolderName + ' » '
 
-  // loop through files in the folder
-  while (files.hasNext()) {
-    var item = files.next()
+  var fileIndex = 0
+  while (fileIndex < files.length) {
+    var item = files[fileIndex]
+    fileIndex += 1
 
     var data = [
-      indent,
       level,
       "--",
-      item.getName(),
+      indent + item.getName(),
       item.getDescription(),
-      item.getLastUpdated(),
+      isTopFolder ? item.ModifiedTimeRaw : item.getLastUpdated(),
       item.getSize(),
-      item.getUrl(),
+      isTopFolder ? item.WebViewLink : item.getUrl(),
       //item.getId(),
       'FILE', //item.getBlob().getContentType(),
       parentFolderPrefix + folderName,
@@ -96,12 +99,11 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
     Logger.log('Adding Folder: ' + item.getName())
 
     var data = [
-      indent,
       level,
-      item.getName(),
+      indent + item.getName(),
       "--",
       item.getDescription(),
-      item.getLastUpdated(),
+      isTopFolder ? item.ModifiedTimeRaw : item.getLastUpdated(),
       item.getSize(),
       item.getUrl(),
       //item.getId(),
@@ -111,9 +113,24 @@ function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
 
     sheet.appendRow(data)
 
-    var relativeFolderParam = (topFolderName == folderName ? '' : relativeFolderName + ' » ') + folderName
-    ScanFoldeRecursively(item.getName(), relativeFolderParam, level + 1, indent + ' ')
+    var relativeFolderParam = folderName + (topFolderName == folderName ? '' : ' « ' + relativeFolderName)
+    ScanFoldeRecursively(item.getName(), relativeFolderParam, level + 1, indent + '  ')
   }
+}
+
+function getFilesOf(top, folder) {
+  if (top) {
+    return Drive.Files.list({driveId: sharedDriveId, corpora: "drive",
+      includeItemsFromAllDrives: true, supportsAllDrives: true}).files
+  }
+  
+  var result = []
+  var files = folder.getFiles()
+
+  while (files.hasNext())
+    result.push(files.next())
+
+  return result;
 }
 
 //NOT USED: https://arisazhar.com/remove-empty-rows-in-spreadsheet-instantly/
