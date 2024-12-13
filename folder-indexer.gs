@@ -1,7 +1,7 @@
 /*
   What this does:
     Lists all files and sub-folders from a folder in Google Drive.
-    Assumes activeSheet >> parent is the folder to be scanned.
+    Assumes activeSheet >> parent is the [Shared] Folder to be scanned.
 
   Adapted from Code written by @hubgit https://gist.github.com/hubgit/3755293
   Updated since DocsList is deprecated  https://ctrlq.org/code/19854-list-files-in-google-drive-folder
@@ -13,96 +13,106 @@
    * uses ' » ' as folder separator
    * added removeEmptyRows/Columns from Trey (SO)
    * added .getParents()[0].getName() per SO: https://stackoverflow.com/a/17618407
-  TODO: publish to amadeus blog:
+
+  Get this From:
+    https://github.com/yieldmore/google-apps-scripts/blob/master/folder-indexer.gs
+
+  TODO:
+    * Put in a date sheet and move that sheet to the beginning and set it as active.
+    * Debate whether to list folders / files first.
 */
 
-var sheet = SpreadsheetApp.getActiveSheet();
-var onlyFolders = sheet.getSheetName() == "Folders Only"
+var sheet = SpreadsheetApp.getActiveSheet()
+var sheetFile = DriveApp.getFileById(sheet.getParent().getId())
+Logger.log('Detected Sheet: ' + sheetFile.getName())
 
-var parentFolder = Drive.Drives.get(sheet.getParent().getId())
-var topFolderName = parentFolder.getName();
-//var topFolderName = 'All YieldMore.org and Growth / Work'
+var sharedDriveId = sheetFile.getParents().next().getId()
+var sharedDrive = Drive.Drives.get(sharedDriveId, { supportsAllDrives: true })
+Logger.log('Scanning Shared Drive: ' + sharedDrive.getName())
 
-// entry function 
+var topFolderName = sharedDrive.name
+
 function ScanFolder() {
-  ScanFoldeRecursively(topFolderName, '')
+  ScanFoldeRecursively(topFolderName, '', 0, '')
   removeEmptyColumns()
   removeEmptyRows()
 }
 
-function ScanFoldeRecursively(folderName, relativeFolderName) {
-  if (topFolderName == folderName) {
-    // clear any existing content
-    sheet.clearContents();
-    // append a header row
+function ScanFoldeRecursively(folderName, relativeFolderName, level, indent) {
+  var isTopFolder = topFolderName == folderName
+  if (isTopFolder) {
+    sheet.clearContents()
+
     sheet.appendRow([
-      "#Folder",
-      "Name",
-      //"Date Last Updated",
-      //"Size",
+      "Indent",
+      "Level",
+      "Folder",
+      "File",
+      "Description",
+      "Date Last Updated",
+      "Size",
       "URL",
       //"ID",
-      "Description",
-      "Type"
-    ]);
+      "Type",
+      "Folder",
+    ])
 
-    Logger.log("REBUILDING SHEET: " + sheet.getSheetName())
+    Logger.log("REBUILDING SHEET In: " + sheetFile.getName())
   }
 
   Logger.log("SCANNING: " + folderName) //DEBUG
 
-  var folderId = DriveApp.getFoldersByName(folderName, { }).next().getId()
-  var folder = Drive.Drives.get(folderId, { supportsAllDrives: true })
+  var folder = DriveApp.getFoldersByName(folderName).next()
 
-  // files is a File Iterator
-  var files = onlyFolders ? false : folder.getFiles()
+  var files = isTopFolder ? Drive.Files.list({driveId: sharedDriveId}).files.values() : folder.getFiles()
 
   var parentFolderPrefix = relativeFolderName == topFolderName ? '' : relativeFolderName + ' » '
 
   // loop through files in the folder
-  while (files && files.hasNext()) {
-    var item = files.next();
+  while (files.hasNext()) {
+    var item = files.next()
 
     var data = [
-      parentFolderPrefix + folderName,
+      indent,
+      level,
+      "--",
       item.getName(),
-      //item.getLastUpdated(),
-      //item.getSize(),
+      item.getDescription(),
+      item.getLastUpdated(),
+      item.getSize(),
       item.getUrl(),
       //item.getId(),
-      item.getDescription(),
       'FILE', //item.getBlob().getContentType(),
-    ];
+      parentFolderPrefix + folderName,
+    ]
 
-    sheet.appendRow(data);
-  } // Completes listing of the files in the named folder
+    sheet.appendRow(data)
+  }
 
-  var subFolders = onlyFolders ? folder.getFolders() : false //Drive.Drives.list({ driveId: folder.id, supportsAllDrives: true }) : false
+  var subFolders = folder.getFolders()
 
-  // now start a loop on the subFolders list
-  while (onlyFolders && subFolders.hasNext()) {
-    var item = subFolders.next();
-    Logger.log("Subfolder name:" + item.getName()); //DEBUG
+  while (subFolders.hasNext()) {
+    var item = subFolders.next()
+    Logger.log('Adding Folder: ' + item.getName())
 
-    if (!onlyFolders) Logger.log("FILES IN THIS FOLDER"); //DEBUG
+    var data = [
+      indent,
+      level,
+      item.getName(),
+      "--",
+      item.getDescription(),
+      item.getLastUpdated(),
+      item.getSize(),
+      item.getUrl(),
+      //item.getId(),
+      'Google Folder',
+      relativeFolderName + ' » ' + folderName,
+    ]
 
-    if (onlyFolders) {
-      var data = [
-        relativeFolderName + ' » ' + folderName,
-        item.getName(),
-        //item.getLastUpdated(),
-        //item.getSize(),
-        item.getUrl(),
-        //item.getId(),
-        item.getDescription(),
-        'Google Folder',
-      ];
-      //Logger.log("data = " + data); //DEBUG
-      sheet.appendRow(data);
-    }
+    sheet.appendRow(data)
 
-    ScanFoldeRecursively(item.getName(),
-      (topFolderName == folderName ? '' : relativeFolderName + ' » ') + folderName)
+    var relativeFolderParam = (topFolderName == folderName ? '' : relativeFolderName + ' » ') + folderName
+    ScanFoldeRecursively(item.getName(), relativeFolderParam, level + 1, indent + ' ')
   }
 }
 
@@ -111,28 +121,29 @@ function ScanFoldeRecursively(folderName, relativeFolderName) {
 //FROM: https://stackoverflow.com/a/34781833
 //Remove All Empty Columns in the Entire Workbook
 function removeEmptyColumns() {
-  var ss = SpreadsheetApp.getActive();
-  var allsheets = ss.getSheets();
-  for (var s in allsheets){
+  var ss = SpreadsheetApp.getActive()
+  var allsheets = ss.getSheets()
+  for (var s in allsheets) {
     var sheet=allsheets[s]
-    var maxColumns = sheet.getMaxColumns(); 
-    var lastColumn = sheet.getLastColumn();
-    if (maxColumns-lastColumn != 0){
-      sheet.deleteColumns(lastColumn+1, maxColumns-lastColumn);
+    var maxColumns = sheet.getMaxColumns()
+    var lastColumn = sheet.getLastColumn()
+    if (maxColumns - lastColumn != 0) {
+      sheet.deleteColumns(lastColumn + 1, maxColumns - lastColumn)
     }
   }
 }
 
 //Remove All Empty Rows in the Entire Workbook
 function removeEmptyRows() {
-  var ss = SpreadsheetApp.getActive();
-  var allsheets = ss.getSheets();
+  var ss = SpreadsheetApp.getActive()
+  var allsheets = ss.getSheets()
+
   for (var s in allsheets){
-    var sheet=allsheets[s]
-    var maxRows = sheet.getMaxRows(); 
-    var lastRow = sheet.getLastRow();
-    if (maxRows-lastRow != 0){
-      sheet.deleteRows(lastRow+1, maxRows-lastRow);
+    var sheet = allsheets[s]
+    var maxRows = sheet.getMaxRows()
+    var lastRow = sheet.getLastRow()
+    if (maxRows - lastRow != 0) {
+      sheet.deleteRows(lastRow + 1, maxRows - lastRow)
     }
   }
 }
