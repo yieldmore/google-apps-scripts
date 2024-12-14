@@ -55,12 +55,10 @@ function ScanAllDrives() {
       parentName = DriveApp.getFileById(sheetFile.getId()).getParents().next().getName()
 
     try {
-      var sharedDrive = Drive.Drives.list
-      ({q: 'name = "' + parentName + '"', supportsAllDrives: true })
-      .drives.pop()
+      var sharedDrive = getSharedDrive(parentName)
       topFolderId = sharedDrive.id
       parentType = 'shared'
-    } catch {}
+    } catch { }
     parents.push({name: parentName, type: parentType})
   }
 
@@ -68,11 +66,18 @@ function ScanAllDrives() {
 }
 
 function ScanDrive(parent, nameIndex) {
-  Logger.log(parent)
+  if (parent.name.substring(0, 1) == '|') {
+    Logger.log('Skipping: ' + parent.name)
+    return
+  }
+
   setCount('...', nameIndex)
 
   isSharedDrive = parent.type == 'shared'
   topFolderName = parent.name
+
+  if(isSharedDrive)
+    topFolderId = getSharedDrive(topFolderName).id
 
   Logger.log('Scanning ' + (isSharedDrive ? 'Shared' : 'Folder in ') + ' Drive: ' + topFolderName)
 
@@ -110,7 +115,9 @@ function ScanFolder(folderName, relativeFolderName, level, indent) {
 
   var relativeFolder = folderName + (isTopFolder ? '' : ' « ' + relativeFolderName)
 
-  var folder = DriveApp.getFoldersByName(folderName).next()
+  var folder = isTopFolder && isSharedDrive
+    ? DriveApp.getFolderById(topFolderId)
+    : DriveApp.getFoldersByName(folderName).next()
 
   var subFolders = getFoldersOf(folder)
 
@@ -155,7 +162,6 @@ function ScanFolder(folderName, relativeFolderName, level, indent) {
 
     sheet.appendRow(data)
   }
-
 }
 
 function sortAscending(item1, item2) {
@@ -188,6 +194,10 @@ function getFilesOf(folder) {
 
   result.sort(sortAscending)
   return result;
+}
+
+function getSharedDrive(name) {
+  return Drive.Drives.list({q: 'name = "' + name + '"', supportsAllDrives: true }).drives.pop()
 }
 
 function setCount(to, row) {
