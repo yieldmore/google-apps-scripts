@@ -69,6 +69,8 @@ function ScanAllDrives() {
 
 function ScanDrive(parent, nameIndex) {
   Logger.log(parent)
+  setCount('...', nameIndex)
+
   isSharedDrive = parent.type == 'shared'
   topFolderName = parent.name
 
@@ -82,6 +84,7 @@ function ScanDrive(parent, nameIndex) {
   ScanFolder(topFolderName, '', 0, '')
   removeEmptyColumns()
   removeEmptyRows()
+  setCount(sheet.getLastRow() - 1, nameIndex)
 }
 
 function ScanFolder(folderName, relativeFolderName, level, indent) {
@@ -185,6 +188,10 @@ function getFilesOf(folder) {
 
   result.sort(sortAscending)
   return result;
+}
+
+function setCount(to, row) {
+  namesSheet.getRange(row + 2, 4).setValue(to)
 }
 
 //NOT USED: https://arisazhar.com/remove-empty-rows-in-spreadsheet-instantly/
